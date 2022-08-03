@@ -130,3 +130,7 @@ dmypy.json
 
 
 result.xlsx
+parse_result/
+test.py
+last_parsed_url.txt
+urls.txt
