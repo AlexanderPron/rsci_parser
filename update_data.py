@@ -8,6 +8,7 @@ import sys
 import os
 import re
 from dataclasses import dataclass
+from contextlib import contextmanager
 
 
 Excel = win32com.client.gencache.EnsureDispatch("Excel.Application")
@@ -33,18 +34,26 @@ class ParseData:
     detail: str = None
 
 
+@contextmanager
 def openWorkbook(excelapp, excelfile):
-    """Функция открытия excel-файла"""
-
+    """Контекстный менеджер для корректного открытия и закрытия excel-файла.Если файла не существует, то он создаётся"""
     try:
-        excel_wb = excelapp.Workbooks(excelfile)
-    except Exception:
         try:
-            excel_wb = excelapp.Workbooks.Open(excelfile)
-        except Exception as e:
-            print(e)
-            excel_wb = None
-    return excel_wb
+            excel_wb = excelapp.Workbooks(excelfile)
+        except Exception:
+            try:
+                excel_wb = excelapp.Workbooks.Open(excelfile)
+            except Exception:
+                excel_wb = excelapp.Workbooks.Add()
+                excel_wb.SaveAs(excelfile)
+    except KeyboardInterrupt:
+        excel_wb.Save()
+        excel_wb.Close()
+        excelapp.Quit()
+    yield excel_wb
+    excel_wb.Save()
+    excel_wb.Close()
+    excelapp.Quit()
 
 
 def timer(func):
@@ -169,7 +178,7 @@ def update_url_file(file_pathname, limit=None):
             new_lines = []
             print("Updating urls in file... Please wait..")
             counter = 1
-            while page != last_page:
+            while page != last_page + 1 :
                 r = requests.get(f"{BASE_URL}/grants/index.php?PAGEN_1={page}&SIZEN_1=9")
                 html = BS(r.content, "lxml")
                 grants = html.select(".info-card > .info-card-body > .info-card-deskription")
@@ -203,6 +212,31 @@ def update_url_file(file_pathname, limit=None):
     else:
         result = get_url_file(file_pathname, last_page)
         return result
+
+
+def get_new_grant_url_list(last_parsed_url_file_pathname, actual_url_file_pathname):
+    """bla-bla-bla"""
+    with io.open(last_parsed_url_file_pathname, "r", encoding="utf-8") as last_parsed_f:
+        last_parsed_url = ""
+        last_parsed_url_file_lines = last_parsed_f.readlines()
+        for item in last_parsed_url_file_lines:
+            if is_correct_link(item.rstrip("\n")):
+                last_parsed_url = item.rstrip("\n")
+                break
+    result_url_list = []
+    if last_parsed_url:
+        with io.open(actual_url_file_pathname, "r", encoding="utf-8") as actual_url_f:
+            urls = actual_url_f.readlines()
+            for url in urls:
+                # Похоже тут что-то не так
+                if (is_correct_link(url.rstrip("\n")) and (url.rstrip("\n") == last_parsed_url)):
+                    return result_url_list
+                else:
+                    if is_correct_link(url.rstrip("\n")):
+                        result_url_list.append(url.rstrip("\n"))
+            return result_url_list
+    else:
+        return result_url_list
 
 
 def get_grant_id(url):
@@ -261,32 +295,35 @@ def push_data(sheet, data: ParseData):
 def main():
     """Главная функция, отражающая логику работы парсера"""
     url_file = os.path.join(BASE_DIR, "urls.txt")
-    urls = update_url_file(url_file, limit=20)
-    # urls = get_url_list(20)
-    if urls:
+    lim = 20
+    update_url_file(url_file, limit=lim)
+    last_parsed_url_file_pathname = os.path.join(BASE_DIR, "last_parsed_url.txt")
+    if not os.path.isfile(last_parsed_url_file_pathname):
+        r = requests.get(f"{BASE_URL}/grants/index.php?PAGEN_1={lim}&SIZEN_1=9")
+        html = BS(r.content, "lxml")
+        grants = html.select(".info-card > .info-card-body > .info-card-deskription")
+        last_link = grants[-1].select("a")
+        full_last_grant_link = BASE_URL + last_link[0].attrs["href"]
+        with io.open(last_parsed_url_file_pathname, "w", encoding="utf-8") as f:
+            f.write(full_last_grant_link)
+    urls = get_new_grant_url_list(last_parsed_url_file_pathname, url_file)
+    if len(urls) > 0:
         count_urls = len(urls)
         k = 1
         current_folder = os.path.join(BASE_DIR, "parse_result")
         if not os.path.isdir(current_folder):
             os.makedirs(current_folder)
         file_path_name = os.path.join(current_folder, RESULT_FILE_NAME)
-        if os.path.isfile(file_path_name):
-            wb = openWorkbook(Excel, file_path_name)
-        else:
-            wb = Excel.Workbooks.Add()
-            wb.SaveAs(file_path_name)
-        sheet = wb.ActiveSheet
-        urls.reverse()
-        for url in urls:
-            progress(k, count_urls, status="Parsing urls...")
-            k += 1
-            if url:
-                parsed_data = parse_url(url)
-                push_data(sheet, parsed_data)
-        wb.Save()
-        wb.Close()
-        Excel.Quit()
-        with io.open(os.path.join(BASE_DIR, "last_parsed_url.txt"), "w", encoding="utf-8") as f:
+        with openWorkbook(Excel, file_path_name) as wb:
+            sheet = wb.ActiveSheet
+            urls.reverse()
+            for url in urls:
+                progress(k, count_urls, status="Parsing urls...")
+                k += 1
+                if url:
+                    parsed_data = parse_url(url)
+                    push_data(sheet, parsed_data)
+        with io.open(last_parsed_url_file_pathname, "w", encoding="utf-8") as f:
             f.write(urls[-1])
     else:
         print("No new urls.. Nothing to parse!")
