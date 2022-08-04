@@ -17,10 +17,11 @@ Excel.DisplayAlerts = False
 BASE_URL = "http://www.rsci.ru"
 RESULT_FILE_NAME = "parsed_data.xlsx"
 
-# Эта хрень связана с какими-то замутами с путями при создании exe-файла
+# Эта хрень связана с какими-то замутами с путями при создании exe-файла и добавлении в планировщик винды
 # https://pyinstaller.org/en/stable/runtime-information.html#using-file-and-sys-meipass
 if getattr(sys, "frozen", False):
-    BASE_DIR = os.getcwd()
+    (filepath, tempfilename) = os.path.split(sys.argv[0])
+    BASE_DIR = filepath
 else:
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -212,26 +213,36 @@ def update_url_file(file_pathname, limit=None):
 
 def get_new_grant_url_list(last_parsed_url_file_pathname, actual_url_file_pathname):
     """bla-bla-bla"""
-    with io.open(last_parsed_url_file_pathname, "r", encoding="utf-8") as last_parsed_f:
+    if os.path.isfile(last_parsed_url_file_pathname):
+        with io.open(last_parsed_url_file_pathname, "r", encoding="utf-8") as last_parsed_f:
+            last_parsed_url = ""
+            last_parsed_url_file_lines = last_parsed_f.readlines()
+            for item in last_parsed_url_file_lines:
+                if is_correct_link(item.rstrip("\n")):
+                    last_parsed_url = item.rstrip("\n")
+                    break
+    else:
         last_parsed_url = ""
-        last_parsed_url_file_lines = last_parsed_f.readlines()
-        for item in last_parsed_url_file_lines:
-            if is_correct_link(item.rstrip("\n")):
-                last_parsed_url = item.rstrip("\n")
-                break
     result_url_list = []
     if last_parsed_url:
         with io.open(actual_url_file_pathname, "r", encoding="utf-8") as actual_url_f:
             urls = actual_url_f.readlines()
-            for url in urls:
-                url = url.rstrip("\n")
-                if is_correct_link(url) and (url == last_parsed_url):
-                    return result_url_list
-                else:
-                    if is_correct_link(url):
-                        result_url_list.append(url)
-            return result_url_list
+        for url in urls:
+            url = url.rstrip("\n")
+            if is_correct_link(url) and (url == last_parsed_url):
+                return result_url_list
+            else:
+                if is_correct_link(url):
+                    result_url_list.append(url)
+        return result_url_list
     else:
+        urls = []
+        with io.open(actual_url_file_pathname, "r", encoding="utf-8") as actual_url_f:
+            urls = actual_url_f.readlines()
+        for url in urls:
+            url = url.rstrip("\n")
+            if is_correct_link(url):
+                result_url_list.append(url)
         return result_url_list
 
 
@@ -300,14 +311,14 @@ def main():
     lim = 20
     update_url_file(url_file, limit=lim)
     last_parsed_url_file_pathname = os.path.join(BASE_DIR, "last_parsed_url.txt")
-    if not os.path.isfile(last_parsed_url_file_pathname):
-        r = requests.get(f"{BASE_URL}/grants/index.php?PAGEN_1={lim}&SIZEN_1=9")
-        html = BS(r.content, "lxml")
-        grants = html.select(".info-card > .info-card-body > .info-card-deskription")
-        last_link = grants[-1].select("a")
-        full_last_grant_link = BASE_URL + last_link[0].attrs["href"]
-        with io.open(last_parsed_url_file_pathname, "w", encoding="utf-8") as f:
-            f.write(full_last_grant_link)
+    # if not os.path.isfile(last_parsed_url_file_pathname):
+    #     r = requests.get(f"{BASE_URL}/grants/index.php?PAGEN_1={lim}&SIZEN_1=9")
+    #     html = BS(r.content, "lxml")
+    #     grants = html.select(".info-card > .info-card-body > .info-card-deskription")
+    #     last_link = grants[-1].select("a")
+    #     full_last_grant_link = BASE_URL + last_link[0].attrs["href"]
+    #     with io.open(last_parsed_url_file_pathname, "w", encoding="utf-8") as f:
+    #         f.write(full_last_grant_link)
     urls = get_new_grant_url_list(last_parsed_url_file_pathname, url_file)
     if len(urls) > 0:
         count_urls = len(urls)
