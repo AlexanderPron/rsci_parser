@@ -38,18 +38,13 @@ class ParseData:
 def openWorkbook(excelapp, excelfile):
     """Контекстный менеджер для корректного открытия и закрытия excel-файла.Если файла не существует, то он создаётся"""
     try:
+        excel_wb = excelapp.Workbooks(excelfile)
+    except Exception:
         try:
-            excel_wb = excelapp.Workbooks(excelfile)
+            excel_wb = excelapp.Workbooks.Open(excelfile)
         except Exception:
-            try:
-                excel_wb = excelapp.Workbooks.Open(excelfile)
-            except Exception:
-                excel_wb = excelapp.Workbooks.Add()
-                excel_wb.SaveAs(excelfile)
-    except KeyboardInterrupt:
-        excel_wb.Save()
-        excel_wb.Close()
-        excelapp.Quit()
+            excel_wb = excelapp.Workbooks.Add()
+            excel_wb.SaveAs(excelfile)
     yield excel_wb
     excel_wb.Save()
     excel_wb.Close()
@@ -165,6 +160,7 @@ def get_url_file(file_pathname, page_num=1):
 def update_url_file(file_pathname, limit=None):
     """Функция обновления файла file_pathname урлов грантов. Возвращает список(!) добавленных новых строк или None"""
     last_page = get_last_page() if not limit else limit
+    result = []
     if os.path.isfile(file_pathname):
         with io.open(file_pathname, "r", encoding="utf-8") as url_file:
             last_url = ""
@@ -178,7 +174,7 @@ def update_url_file(file_pathname, limit=None):
             new_lines = []
             print("Updating urls in file... Please wait..")
             counter = 1
-            while page != last_page + 1 :
+            while page != last_page + 1:
                 r = requests.get(f"{BASE_URL}/grants/index.php?PAGEN_1={page}&SIZEN_1=9")
                 html = BS(r.content, "lxml")
                 grants = html.select(".info-card > .info-card-body > .info-card-deskription")
@@ -190,7 +186,6 @@ def update_url_file(file_pathname, limit=None):
                     if full_grant_link == last_url:
                         if new_lines:
                             with io.open(file_pathname, "w", encoding="utf-8") as url_file:
-                                result = []
                                 copy_new_lines = []
                                 copy_new_lines.extend(new_lines)
                                 for item in copy_new_lines:
@@ -211,7 +206,8 @@ def update_url_file(file_pathname, limit=None):
         return result
     else:
         result = get_url_file(file_pathname, last_page)
-        return result
+    print("Url file updated!")
+    return result
 
 
 def get_new_grant_url_list(last_parsed_url_file_pathname, actual_url_file_pathname):
@@ -228,12 +224,12 @@ def get_new_grant_url_list(last_parsed_url_file_pathname, actual_url_file_pathna
         with io.open(actual_url_file_pathname, "r", encoding="utf-8") as actual_url_f:
             urls = actual_url_f.readlines()
             for url in urls:
-                # Похоже тут что-то не так
-                if (is_correct_link(url.rstrip("\n")) and (url.rstrip("\n") == last_parsed_url)):
+                url = url.rstrip("\n")
+                if is_correct_link(url) and (url == last_parsed_url):
                     return result_url_list
                 else:
-                    if is_correct_link(url.rstrip("\n")):
-                        result_url_list.append(url.rstrip("\n"))
+                    if is_correct_link(url):
+                        result_url_list.append(url)
             return result_url_list
     else:
         return result_url_list
@@ -253,8 +249,14 @@ def sheet_format(sheet):
     sheet.Columns(3).ColumnWidth = 10
     sheet.Columns(4).ColumnWidth = 100
     sheet.Columns.WrapText = True
-    sheet.Range("A1:D100").HorizontalAlignment = win32com.client.constants.xlLeft
-    sheet.Range("A1:D100").VerticalAlignment = win32com.client.constants.xlTop
+    sheet.Range("A1:D1").HorizontalAlignment = win32com.client.constants.xlCenter
+    sheet.Range("A1:D1").VerticalAlignment = win32com.client.constants.xlCenter
+    sheet.Range("A2:D1000").HorizontalAlignment = win32com.client.constants.xlLeft
+    sheet.Range("A2:D1000").VerticalAlignment = win32com.client.constants.xlTop
+    sheet.Cells(1, 1).Value = "№ п/п"
+    sheet.Cells(1, 2).Value = "Название гранта"
+    sheet.Cells(1, 3).Value = "Дата"
+    sheet.Cells(1, 4).Value = "Описание"
     return sheet
 
 
@@ -272,7 +274,7 @@ def parse_url(url):
         if len(string) > 1:
             full_describe_text += f"{string}\n"
         else:
-            full_describe_text = full_describe_text[: (len(full_describe_text) - 2)]
+            full_describe_text = full_describe_text.rstrip("\n")
             full_describe_text += f"{string}\n"
     parsed_url_data = ParseData(title=grant_title[0].text, date=grant_date[0].text, detail=full_describe_text)
     return parsed_url_data
@@ -280,14 +282,14 @@ def parse_url(url):
 
 def push_data(sheet, data: ParseData):
     """Функция для добавления данных data на первую строчку листа sheet"""
-    sheet.Rows(1).Insert(1)
+    sheet.Rows(2).Insert(1)
     sheet_format(sheet)
-    sheet.Cells(1, 2).Value = data.title
-    sheet.Cells(1, 3).Value = data.date
-    sheet.Cells(1, 4).Value = data.detail
+    sheet.Cells(2, 2).Value = data.title
+    sheet.Cells(2, 3).Value = data.date
+    sheet.Cells(2, 4).Value = data.detail
     i = 1
-    while sheet.Cells(i, 2).Value:
-        sheet.Cells(i, 1).Value = str(i)
+    while sheet.Cells(i + 1, 2).Value:
+        sheet.Cells(i + 1, 1).Value = str(i)
         i += 1
 
 
@@ -314,15 +316,20 @@ def main():
         if not os.path.isdir(current_folder):
             os.makedirs(current_folder)
         file_path_name = os.path.join(current_folder, RESULT_FILE_NAME)
-        with openWorkbook(Excel, file_path_name) as wb:
-            sheet = wb.ActiveSheet
-            urls.reverse()
-            for url in urls:
-                progress(k, count_urls, status="Parsing urls...")
-                k += 1
-                if url:
-                    parsed_data = parse_url(url)
-                    push_data(sheet, parsed_data)
+        try:
+            with openWorkbook(Excel, file_path_name) as wb:
+                sheet = wb.ActiveSheet
+                urls.reverse()
+                for url in urls:
+                    progress(k, count_urls, status="Parsing urls...")
+                    k += 1
+                    if url:
+                        parsed_data = parse_url(url)
+                        push_data(sheet, parsed_data)
+        except KeyboardInterrupt:
+            wb.Close(False)
+            Excel.Quit()
+            return
         with io.open(last_parsed_url_file_pathname, "w", encoding="utf-8") as f:
             f.write(urls[-1])
     else:
