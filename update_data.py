@@ -135,6 +135,21 @@ def get_url_list(page_num=1):
     return url_list
 
 
+def checking_exceptions(str_):
+    """ФУНКЦИЯ КОТОРАЯ ФИЛЬТРУЕТ НЕ НУЖНЫЕ КАТЕГОРИИ ГРАНТОВ"""
+    exception = [
+        "Журналистика",
+        "Культура",
+        "Медицина",
+        "Образование",
+        "Естественные науки",
+        "..",
+    ]
+    if all(x.lower() != str_.lower() for x in exception):
+        return True
+    return False
+
+
 def get_url_file(file_pathname, page_num=1):
     """Функция для создания файла file_pathname с урлами грантов первых page_num страниц.
     Возвращает список урлов в полученном файле"""
@@ -144,10 +159,17 @@ def get_url_file(file_pathname, page_num=1):
             progress(page, page_num, status="Getting urls file...")
             r = requests.get(f"{BASE_URL}/grants/index.php?PAGEN_1={page}&SIZEN_1=9")
             html = BS(r.content, "lxml")
-            grants = html.select(".info-card > .info-card-body > .info-card-deskription")
+            # grants = html.select(".info-card > .info-card-body > .info-card-deskription")
+            # for grant in grants:
+            #     grant_link = grant.select("a")
+            #     f.write(f'{BASE_URL + grant_link[0].attrs["href"]}\n')
+            # page += 1
+            grants = html.select(".info-card > .info-card-body")
             for grant in grants:
-                grant_link = grant.select("a")
-                f.write(f'{BASE_URL + grant_link[0].attrs["href"]}\n')
+                yyy = grant.select(".info-card-img > .img-text > .info-branch > a")
+                if checking_exceptions(yyy[0].text):
+                    grant_link = grant.select(".info-card-deskription > a")
+                    f.write(f'{BASE_URL + grant_link[0].attrs["href"]}\n')
             page += 1
     with io.open(file_pathname, "r", encoding="utf-8") as url_file:
         lines = url_file.readlines()
