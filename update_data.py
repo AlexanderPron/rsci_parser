@@ -33,6 +33,7 @@ class ParseData:
     title: str = None
     date: str = None
     detail: str = None
+    category: str = None
 
 
 @contextmanager
@@ -169,13 +170,13 @@ def get_url_file(file_pathname, page_num=1):
                 yyy = grant.select(".info-card-img > .img-text > .info-branch > a")
                 if checking_exceptions(yyy[0].text):
                     grant_link = grant.select(".info-card-deskription > a")
-                    f.write(f'{BASE_URL + grant_link[0].attrs["href"]}\n')
+                    f.write(f'{BASE_URL + grant_link[0].attrs["href"]};{yyy[0].text}\n')
             page += 1
     with io.open(file_pathname, "r", encoding="utf-8") as url_file:
         lines = url_file.readlines()
-    result = []
+    result = {}
     for line in lines:
-        result.append(line.rstrip("\n"))
+        result[line.split(";")[0]] = line.split(";")[1]
     print("\n")
     return result
 
@@ -183,14 +184,14 @@ def get_url_file(file_pathname, page_num=1):
 def update_url_file(file_pathname, limit=None):
     """Функция обновления файла file_pathname урлов грантов. Возвращает список(!) добавленных новых строк или None"""
     last_page = get_last_page() if not limit else limit
-    result = []
+    result = {}
     if os.path.isfile(file_pathname):
         with io.open(file_pathname, "r", encoding="utf-8") as url_file:
             last_url = ""
             lines = url_file.readlines()
             for line in lines:
-                if is_correct_link(line.rstrip("\n")):
-                    last_url = line.rstrip("\n")
+                if is_correct_link(line.split(";")[0]):
+                    last_url = line.split(";")[0]
                     break
         if last_url:
             page = 1
@@ -200,11 +201,13 @@ def update_url_file(file_pathname, limit=None):
             while page != last_page + 1:
                 r = requests.get(f"{BASE_URL}/grants/index.php?PAGEN_1={page}&SIZEN_1=9")
                 html = BS(r.content, "lxml")
-                grants = html.select(".info-card > .info-card-body > .info-card-deskription")
+                grants = html.select(".info-card > .info-card-body")
                 for grant in grants:
                     waiting_animation(counter)
+                    yyy = grant.select(".info-card-img > .img-text > .info-branch")
+                    grand_category = yyy[0].text
                     counter += 1
-                    grant_link = grant.select("a")
+                    grant_link = grant.select(".info-card-deskription > a")
                     full_grant_link = BASE_URL + grant_link[0].attrs["href"]
                     if full_grant_link == last_url:
                         if new_lines:
@@ -212,7 +215,8 @@ def update_url_file(file_pathname, limit=None):
                                 copy_new_lines = []
                                 copy_new_lines.extend(new_lines)
                                 for item in copy_new_lines:
-                                    result.append(item.rstrip("\n"))
+                                    # result.append(item.rstrip("\n"))
+                                    result[item.split(";")[0]] = item.split(";")[1]
                                 new_lines.extend(lines)
                                 url_file.writelines(new_lines)
                         else:
@@ -221,7 +225,7 @@ def update_url_file(file_pathname, limit=None):
                         print("\nUpdated!")
                         return result
                     else:
-                        new_lines.append(f"{full_grant_link}\n")
+                        new_lines.append(f"{full_grant_link};{grand_category}\n")
                 page += 1
         else:
             result = get_url_file(file_pathname, last_page)
@@ -245,27 +249,29 @@ def get_new_grant_url_list(last_parsed_url_file_pathname, actual_url_file_pathna
                     break
     else:
         last_parsed_url = ""
-    result_url_list = []
+    result_url_dict = {}
     if last_parsed_url:
         with io.open(actual_url_file_pathname, "r", encoding="utf-8") as actual_url_f:
-            urls = actual_url_f.readlines()
-        for url in urls:
-            url = url.rstrip("\n")
+            lines = actual_url_f.readlines()
+        for line in lines:
+            url = line.split(";")[0]
+            grant_category = line.split(";")[1]
             if is_correct_link(url) and (url == last_parsed_url):
-                return result_url_list
+                return result_url_dict
             else:
                 if is_correct_link(url):
-                    result_url_list.append(url)
-        return result_url_list
+                    result_url_dict[url] = grant_category
+        return result_url_dict
     else:
-        urls = []
+        # lines = []
         with io.open(actual_url_file_pathname, "r", encoding="utf-8") as actual_url_f:
-            urls = actual_url_f.readlines()
-        for url in urls:
-            url = url.rstrip("\n")
+            lines = actual_url_f.readlines()
+        for line in lines:
+            url = line.split(";")[0]
+            grant_category = line.split(";")[1]
             if is_correct_link(url):
-                result_url_list.append(url)
-        return result_url_list
+                result_url_dict[url] = grant_category
+        return result_url_dict
 
 
 def get_grant_id(url):
@@ -279,21 +285,23 @@ def sheet_format(sheet):
     """Функция применения стиля для exel листа sheet"""
     sheet.Columns(1).ColumnWidth = 5
     sheet.Columns(2).ColumnWidth = 30
-    sheet.Columns(3).ColumnWidth = 10
-    sheet.Columns(4).ColumnWidth = 100
+    sheet.Columns(3).ColumnWidth = 30
+    sheet.Columns(4).ColumnWidth = 10
+    sheet.Columns(5).ColumnWidth = 100
     sheet.Columns.WrapText = True
-    sheet.Range("A1:D1").HorizontalAlignment = win32com.client.constants.xlCenter
-    sheet.Range("A1:D1").VerticalAlignment = win32com.client.constants.xlCenter
-    sheet.Range("A2:D1000").HorizontalAlignment = win32com.client.constants.xlLeft
-    sheet.Range("A2:D1000").VerticalAlignment = win32com.client.constants.xlTop
+    sheet.Range("A1:E1").HorizontalAlignment = win32com.client.constants.xlCenter
+    sheet.Range("A1:E1").VerticalAlignment = win32com.client.constants.xlCenter
+    sheet.Range("A2:E1000").HorizontalAlignment = win32com.client.constants.xlLeft
+    sheet.Range("A2:E1000").VerticalAlignment = win32com.client.constants.xlTop
     sheet.Cells(1, 1).Value = "№ п/п"
-    sheet.Cells(1, 2).Value = "Название гранта"
-    sheet.Cells(1, 3).Value = "Дата"
-    sheet.Cells(1, 4).Value = "Описание"
+    sheet.Cells(1, 2).Value = "Категория"
+    sheet.Cells(1, 3).Value = "Название гранта"
+    sheet.Cells(1, 4).Value = "Дата"
+    sheet.Cells(1, 5).Value = "Описание"
     return sheet
 
 
-def parse_url(url):
+def parse_url(url, grant_category):
     """Функция, которая парсит url. На выходе - объект класса ParseData с распарсеными данными"""
     if not is_correct_link(url):
         return None
@@ -309,17 +317,23 @@ def parse_url(url):
         else:
             full_describe_text = full_describe_text.rstrip("\n")
             full_describe_text += f"{string}\n"
-    parsed_url_data = ParseData(title=grant_title[0].text, date=grant_date[0].text, detail=full_describe_text)
+    parsed_url_data = ParseData(
+        title=grant_title[0].text,
+        date=grant_date[0].text,
+        detail=full_describe_text,
+        category=grant_category,
+    )
     return parsed_url_data
 
 
 def push_data(sheet, data: ParseData):
-    """Функция для добавления данных data на первую строчку листа sheet"""
+    """Функция для добавления данных data на вторую строчку листа sheet"""
     sheet.Rows(2).Insert(1)
     sheet_format(sheet)
-    sheet.Cells(2, 2).Value = data.title
-    sheet.Cells(2, 3).Value = data.date
-    sheet.Cells(2, 4).Value = data.detail
+    sheet.Cells(2, 2).Value = data.category
+    sheet.Cells(2, 3).Value = data.title
+    sheet.Cells(2, 4).Value = data.date
+    sheet.Cells(2, 5).Value = data.detail
     i = 1
     while sheet.Cells(i + 1, 2).Value:
         sheet.Cells(i + 1, 1).Value = str(i)
@@ -341,8 +355,9 @@ def main():
     #     full_last_grant_link = BASE_URL + last_link[0].attrs["href"]
     #     with io.open(last_parsed_url_file_pathname, "w", encoding="utf-8") as f:
     #         f.write(full_last_grant_link)
-    urls = get_new_grant_url_list(last_parsed_url_file_pathname, url_file)
-    if len(urls) > 0:
+    urls_dict = get_new_grant_url_list(last_parsed_url_file_pathname, url_file)
+    urls = list(urls_dict.keys())
+    if urls:
         count_urls = len(urls)
         k = 1
         current_folder = os.path.join(BASE_DIR, "parse_result")
@@ -357,7 +372,7 @@ def main():
                     progress(k, count_urls, status="Parsing urls...")
                     k += 1
                     if url:
-                        parsed_data = parse_url(url)
+                        parsed_data = parse_url(url, urls_dict.get(url))
                         push_data(sheet, parsed_data)
         except KeyboardInterrupt:
             wb.Close(False)
