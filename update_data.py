@@ -34,6 +34,7 @@ class ParseData:
     date: str = None
     detail: str = None
     category: str = None
+    parse_datetime: str = None
 
 
 @contextmanager
@@ -207,25 +208,26 @@ def update_url_file(file_pathname, limit=None):
                     yyy = grant.select(".info-card-img > .img-text > .info-branch")
                     grand_category = yyy[0].text
                     counter += 1
-                    grant_link = grant.select(".info-card-deskription > a")
-                    full_grant_link = BASE_URL + grant_link[0].attrs["href"]
-                    if full_grant_link == last_url:
-                        if new_lines:
-                            with io.open(file_pathname, "w", encoding="utf-8") as url_file:
-                                copy_new_lines = []
-                                copy_new_lines.extend(new_lines)
-                                for item in copy_new_lines:
-                                    # result.append(item.rstrip("\n"))
-                                    result[item.split(";")[0]] = item.split(";")[1]
-                                new_lines.extend(lines)
-                                url_file.writelines(new_lines)
+                    if checking_exceptions(yyy[0].text):
+                        grant_link = grant.select(".info-card-deskription > a")
+                        full_grant_link = BASE_URL + grant_link[0].attrs["href"]
+                        if full_grant_link == last_url:
+                            if new_lines:
+                                with io.open(file_pathname, "w", encoding="utf-8") as url_file:
+                                    copy_new_lines = []
+                                    copy_new_lines.extend(new_lines)
+                                    for item in copy_new_lines:
+                                        # result.append(item.rstrip("\n"))
+                                        result[item.split(";")[0]] = item.split(";")[1]
+                                    new_lines.extend(lines)
+                                    url_file.writelines(new_lines)
+                            else:
+                                print("Your file is already updated")
+                                return None
+                            print("\nUpdated!")
+                            return result
                         else:
-                            print("Your file is already updated")
-                            return None
-                        print("\nUpdated!")
-                        return result
-                    else:
-                        new_lines.append(f"{full_grant_link};{grand_category}\n")
+                            new_lines.append(f"{full_grant_link};{grand_category}\n")
                 page += 1
         else:
             result = get_url_file(file_pathname, last_page)
@@ -288,16 +290,18 @@ def sheet_format(sheet):
     sheet.Columns(3).ColumnWidth = 30
     sheet.Columns(4).ColumnWidth = 10
     sheet.Columns(5).ColumnWidth = 100
+    sheet.Columns(6).ColumnWidth = 20
     sheet.Columns.WrapText = True
-    sheet.Range("A1:E1").HorizontalAlignment = win32com.client.constants.xlCenter
-    sheet.Range("A1:E1").VerticalAlignment = win32com.client.constants.xlCenter
-    sheet.Range("A2:E1000").HorizontalAlignment = win32com.client.constants.xlLeft
-    sheet.Range("A2:E1000").VerticalAlignment = win32com.client.constants.xlTop
+    sheet.Range("A1:F1").HorizontalAlignment = win32com.client.constants.xlCenter
+    sheet.Range("A1:F1").VerticalAlignment = win32com.client.constants.xlCenter
+    sheet.Range("A2:F1000").HorizontalAlignment = win32com.client.constants.xlLeft
+    sheet.Range("A2:F1000").VerticalAlignment = win32com.client.constants.xlTop
     sheet.Cells(1, 1).Value = "№ п/п"
     sheet.Cells(1, 2).Value = "Категория"
     sheet.Cells(1, 3).Value = "Название гранта"
     sheet.Cells(1, 4).Value = "Дата"
     sheet.Cells(1, 5).Value = "Описание"
+    sheet.Cells(1, 6).Value = "Дата и время парсинга"
     return sheet
 
 
@@ -317,11 +321,13 @@ def parse_url(url, grant_category):
         else:
             full_describe_text = full_describe_text.rstrip("\n")
             full_describe_text += f"{string}\n"
+    dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     parsed_url_data = ParseData(
         title=grant_title[0].text,
         date=grant_date[0].text,
         detail=full_describe_text,
         category=grant_category,
+        parse_datetime=dt,
     )
     return parsed_url_data
 
@@ -334,6 +340,8 @@ def push_data(sheet, data: ParseData):
     sheet.Cells(2, 3).Value = data.title
     sheet.Cells(2, 4).Value = data.date
     sheet.Cells(2, 5).Value = data.detail
+    sheet.Cells(2, 6).NumberFormat = "ДД.ММ.ГГГГ чч:мм:сс"
+    sheet.Cells(2, 6).Value = data.parse_datetime
     i = 1
     while sheet.Cells(i + 1, 2).Value:
         sheet.Cells(i + 1, 1).Value = str(i)
