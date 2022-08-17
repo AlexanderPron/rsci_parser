@@ -12,9 +12,10 @@ from contextlib import contextmanager
 import psutil
 
 
-PARSER_VERSION = "Version 1.4"
+PARSER_VERSION = "Version 1.5"
 BASE_URL = "http://www.rsci.ru"
 RESULT_FILE_NAME = "parsed_data.xlsx"
+
 
 # Эта хрень связана с какими-то замутами с путями при создании exe-файла и добавлении в планировщик винды
 # https://pyinstaller.org/en/stable/runtime-information.html#using-file-and-sys-meipass
@@ -23,6 +24,8 @@ if getattr(sys, "frozen", False):
     BASE_DIR = filepath
 else:
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
+log_file = os.path.join(BASE_DIR, "parser.log")
 
 
 @dataclass
@@ -56,6 +59,7 @@ def openWorkbook(excelapp, excelfile):
             excel_wb.Close()
     else:
         print(f"\nWARNING!! Close file named {RESULT_FILE_NAME} and try to parse again\nPress ENTER to quit..")
+        add_log("Some excel files oppened. Parser aborted", "warning")
         input()
         sys.exit()
 
@@ -105,6 +109,12 @@ def timedelta_to_hms(duration):
     return hours, minutes, seconds
 
 
+def add_log(msg_text, msg_type="info", log_file=log_file):
+    with io.open(log_file, "a", encoding="utf-8") as f:
+        record = f'\n[{datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S")}] {msg_type.upper()}: {msg_text}'
+        f.write(record)
+
+
 def is_correct_link(url):
     """Функция проврки корректности ссылки
     Пример корректной ссылки http://www.rsci.ru/grants/grant_news/276/244299.php
@@ -116,30 +126,37 @@ def is_correct_link(url):
 
 def get_last_page():
     """Функция получения номера последней страницы в пагинации"""
-
-    r = requests.get(f"{BASE_URL}/grants/grant_news/?SIZEN_1=9")
-    html = BS(r.content, "lxml")
-    last_page = int(html.find_all("li", "page-num")[-1].get_text())
+    try:
+        r = requests.get(f"{BASE_URL}/grants/grant_news/?SIZEN_1=9")
+        html = BS(r.content, "lxml")
+        last_page = int(html.find_all("li", "page-num")[-1].get_text())
+    except requests.exceptions.RequestException as e:
+        add_log(e, "error")
+        raise SystemExit(e)
     return last_page
 
 
 def get_url_list(page_num=1):
     """Функция получения списка урлов грантов с page_num первых страниц"""
-    page = 1
-    url_list = []
-    while page != page_num + 1:
-        progress(page, page_num, status="Getting urls...")
-        r = requests.get(f"{BASE_URL}/grants/index.php?PAGEN_1={page}&SIZEN_1=9")
-        html = BS(r.content, "lxml")
-        grants = html.select(".info-card > .info-card-body > .info-card-deskription")
-        if len(grants):
-            for grant in grants:
-                grant_link = grant.select("a")
-                url_list.append(BASE_URL + grant_link[0].attrs["href"])
-            page += 1
-        else:
-            break
-    print("\n")
+    try:
+        page = 1
+        url_list = []
+        while page != page_num + 1:
+            progress(page, page_num, status="Getting urls...")
+            r = requests.get(f"{BASE_URL}/grants/index.php?PAGEN_1={page}&SIZEN_1=9")
+            html = BS(r.content, "lxml")
+            grants = html.select(".info-card > .info-card-body > .info-card-deskription")
+            if len(grants):
+                for grant in grants:
+                    grant_link = grant.select("a")
+                    url_list.append(BASE_URL + grant_link[0].attrs["href"])
+                page += 1
+            else:
+                break
+        print("\n")
+    except requests.exceptions.RequestException as e:
+        add_log(e, "error")
+        raise SystemExit(e)
     return url_list
 
 
@@ -161,19 +178,23 @@ def checking_exceptions(str_):
 def get_url_file(file_pathname, page_num=1):
     """Функция для создания файла file_pathname с урлами грантов первых page_num страниц.
     Возвращает список урлов в полученном файле"""
-    page = 1
-    with io.open(file_pathname, "w", encoding="utf-8") as f:
-        while page != page_num + 1:
-            progress(page, page_num, status="Getting urls file...")
-            r = requests.get(f"{BASE_URL}/grants/index.php?PAGEN_1={page}&SIZEN_1=9")
-            html = BS(r.content, "lxml")
-            grants = html.select(".info-card > .info-card-body")
-            for grant in grants:
-                yyy = grant.select(".info-card-img > .img-text > .info-branch > a")
-                if checking_exceptions(yyy[0].text):
-                    grant_link = grant.select(".info-card-deskription > a")
-                    f.write(f'{BASE_URL + grant_link[0].attrs["href"]};{yyy[0].text}\n')
-            page += 1
+    try:
+        page = 1
+        with io.open(file_pathname, "w", encoding="utf-8") as f:
+            while page != page_num + 1:
+                progress(page, page_num, status="Getting urls file...")
+                r = requests.get(f"{BASE_URL}/grants/index.php?PAGEN_1={page}&SIZEN_1=9")
+                html = BS(r.content, "lxml")
+                grants = html.select(".info-card > .info-card-body")
+                for grant in grants:
+                    yyy = grant.select(".info-card-img > .img-text > .info-branch > a")
+                    if checking_exceptions(yyy[0].text):
+                        grant_link = grant.select(".info-card-deskription > a")
+                        f.write(f'{BASE_URL + grant_link[0].attrs["href"]};{yyy[0].text}\n')
+                page += 1
+    except requests.exceptions.RequestException as e:
+        add_log(e, "error")
+        raise SystemExit(e)
     with io.open(file_pathname, "r", encoding="utf-8") as url_file:
         lines = url_file.readlines()
     result = {}
@@ -185,95 +206,106 @@ def get_url_file(file_pathname, page_num=1):
 
 def update_url_file(file_pathname, limit=None):
     """Функция обновления файла file_pathname урлов грантов. Возвращает список(!) добавленных новых строк или None"""
-    last_page = get_last_page() if not limit else limit
-    result = {}
-    if os.path.isfile(file_pathname):
-        with io.open(file_pathname, "r", encoding="utf-8") as url_file:
-            last_url = ""
-            lines = url_file.readlines()
-            for line in lines:
-                if is_correct_link(line.split(";")[0]):
-                    last_url = line.split(";")[0]
-                    break
-        if last_url:
-            page = 1
-            new_lines = []
-            print("Updating urls in file... Please wait..")
-            counter = 1
-            while page != last_page + 1:
-                r = requests.get(f"{BASE_URL}/grants/index.php?PAGEN_1={page}&SIZEN_1=9")
-                html = BS(r.content, "lxml")
-                grants = html.select(".info-card > .info-card-body")
-                for grant in grants:
-                    waiting_animation(counter)
-                    yyy = grant.select(".info-card-img > .img-text > .info-branch")
-                    grand_category = yyy[0].text
-                    counter += 1
-                    if checking_exceptions(yyy[0].text):
-                        grant_link = grant.select(".info-card-deskription > a")
-                        full_grant_link = BASE_URL + grant_link[0].attrs["href"]
-                        if full_grant_link == last_url:
-                            if new_lines:
-                                with io.open(file_pathname, "w", encoding="utf-8") as url_file:
-                                    copy_new_lines = []
-                                    copy_new_lines.extend(new_lines)
-                                    for item in copy_new_lines:
-                                        # result.append(item.rstrip("\n"))
-                                        result[item.split(";")[0]] = item.split(";")[1]
-                                    new_lines.extend(lines)
-                                    url_file.writelines(new_lines)
+    try:
+        last_page = get_last_page() if not limit else limit
+        result = {}
+        if os.path.isfile(file_pathname):
+            with io.open(file_pathname, "r", encoding="utf-8") as url_file:
+                last_url = ""
+                lines = url_file.readlines()
+                for line in lines:
+                    if is_correct_link(line.split(";")[0]):
+                        last_url = line.split(";")[0]
+                        break
+            if last_url:
+                page = 1
+                new_lines = []
+                print("Updating urls in file... Please wait..")
+                counter = 1
+                while page != last_page + 1:
+                    r = requests.get(f"{BASE_URL}/grants/index.php?PAGEN_1={page}&SIZEN_1=9")
+                    html = BS(r.content, "lxml")
+                    grants = html.select(".info-card > .info-card-body")
+                    for grant in grants:
+                        waiting_animation(counter)
+                        yyy = grant.select(".info-card-img > .img-text > .info-branch")
+                        grand_category = yyy[0].text
+                        counter += 1
+                        if checking_exceptions(yyy[0].text):
+                            grant_link = grant.select(".info-card-deskription > a")
+                            full_grant_link = BASE_URL + grant_link[0].attrs["href"]
+                            if full_grant_link == last_url:
+                                if new_lines:
+                                    with io.open(file_pathname, "w", encoding="utf-8") as url_file:
+                                        copy_new_lines = []
+                                        copy_new_lines.extend(new_lines)
+                                        for item in copy_new_lines:
+                                            # result.append(item.rstrip("\n"))
+                                            result[item.split(";")[0]] = item.split(";")[1]
+                                        new_lines.extend(lines)
+                                        url_file.writelines(new_lines)
+                                else:
+                                    print("Your file is already updated")
+                                    return None
+                                print("\nUpdated!")
+                                return result
                             else:
-                                print("Your file is already updated")
-                                return None
-                            print("\nUpdated!")
-                            return result
-                        else:
-                            new_lines.append(f"{full_grant_link};{grand_category}\n")
-                page += 1
+                                new_lines.append(f"{full_grant_link};{grand_category}\n")
+                    page += 1
+            else:
+                result = get_url_file(file_pathname, last_page)
+            print("Url file updated!")
+            add_log("Url file updated")
+            return result
         else:
             result = get_url_file(file_pathname, last_page)
         print("Url file updated!")
-        return result
-    else:
-        result = get_url_file(file_pathname, last_page)
-    print("Url file updated!")
+        add_log("Url file updated")
+    except requests.exceptions.RequestException as e:
+        add_log(e, "error")
+        raise SystemExit(e)
     return result
 
 
 def get_new_grant_url_list(last_parsed_url_file_pathname, actual_url_file_pathname):
     """bla-bla-bla"""
-    if os.path.isfile(last_parsed_url_file_pathname):
-        with io.open(last_parsed_url_file_pathname, "r", encoding="utf-8") as last_parsed_f:
+    try:
+        if os.path.isfile(last_parsed_url_file_pathname):
+            with io.open(last_parsed_url_file_pathname, "r", encoding="utf-8") as last_parsed_f:
+                last_parsed_url = ""
+                last_parsed_url_file_lines = last_parsed_f.readlines()
+                for item in last_parsed_url_file_lines:
+                    if is_correct_link(item.rstrip("\n")):
+                        last_parsed_url = item.rstrip("\n")
+                        break
+        else:
             last_parsed_url = ""
-            last_parsed_url_file_lines = last_parsed_f.readlines()
-            for item in last_parsed_url_file_lines:
-                if is_correct_link(item.rstrip("\n")):
-                    last_parsed_url = item.rstrip("\n")
-                    break
-    else:
-        last_parsed_url = ""
-    result_url_dict = {}
-    if last_parsed_url:
-        with io.open(actual_url_file_pathname, "r", encoding="utf-8") as actual_url_f:
-            lines = actual_url_f.readlines()
-        for line in lines:
-            url = line.split(";")[0]
-            grant_category = line.split(";")[1]
-            if is_correct_link(url) and (url == last_parsed_url):
-                return result_url_dict
-            else:
+        result_url_dict = {}
+        if last_parsed_url:
+            with io.open(actual_url_file_pathname, "r", encoding="utf-8") as actual_url_f:
+                lines = actual_url_f.readlines()
+            for line in lines:
+                url = line.split(";")[0]
+                grant_category = line.split(";")[1]
+                if is_correct_link(url) and (url == last_parsed_url):
+                    return result_url_dict
+                else:
+                    if is_correct_link(url):
+                        result_url_dict[url] = grant_category
+            return result_url_dict
+        else:
+            with io.open(actual_url_file_pathname, "r", encoding="utf-8") as actual_url_f:
+                lines = actual_url_f.readlines()
+            for line in lines:
+                url = line.split(";")[0]
+                grant_category = line.split(";")[1]
                 if is_correct_link(url):
                     result_url_dict[url] = grant_category
-        return result_url_dict
-    else:
-        with io.open(actual_url_file_pathname, "r", encoding="utf-8") as actual_url_f:
-            lines = actual_url_f.readlines()
-        for line in lines:
-            url = line.split(";")[0]
-            grant_category = line.split(";")[1]
-            if is_correct_link(url):
-                result_url_dict[url] = grant_category
-        return result_url_dict
+    except Exception as e:
+        print("Something wrong with files working.. See details in log file")
+        add_log(e, "error")
+        raise SystemExit(e)
+    return result_url_dict
 
 
 def get_grant_id(url):
@@ -356,21 +388,35 @@ def main():
         Excel.DisplayAlerts = False
     except TypeError:
         print("\nWARNING!! Close excel processes and try to parse again\nPress ENTER to quit..")
+        add_log("Excel process is running in system", "warning")
+        input()
+        sys.exit()
+    except Exception as e:
+        print("\nUnknown error. See details in log file\nPress ENTER to quit..")
+        add_log(e, "error")
         input()
         sys.exit()
     url_file = os.path.join(BASE_DIR, "urls.txt")
     lim = 20
-    update_url_file(url_file, limit=lim)
+    try:
+        update_url_file(url_file, limit=lim)
+    except KeyboardInterrupt:
+        add_log("Parse interrupted by user", "warning")
+        print("\nInterrupted")
+        raise SystemExit()
     last_parsed_url_file_pathname = os.path.join(BASE_DIR, "last_parsed_url.txt")
     urls_dict = get_new_grant_url_list(last_parsed_url_file_pathname, url_file)
     urls = list(urls_dict.keys())
     if urls:
+        pdatetime = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M_%S")
+        result_fname = f"parser_data_{pdatetime}"
         count_urls = len(urls)
         k = 1
         current_folder = os.path.join(BASE_DIR, "parse_result")
         if not os.path.isdir(current_folder):
             os.makedirs(current_folder)
-        file_path_name = os.path.join(current_folder, RESULT_FILE_NAME)
+        # file_path_name = os.path.join(current_folder, RESULT_FILE_NAME)
+        file_path_name = os.path.join(current_folder, result_fname)
         try:
             with openWorkbook(Excel, file_path_name) as wb:
                 sheet = wb.ActiveSheet
@@ -383,11 +429,15 @@ def main():
                         push_data(sheet, parsed_data)
         except KeyboardInterrupt:
             wb.Close(False)
-            return
+            add_log("Parse interrupted by user", "warning")
+            print("\nInterrupted")
+            raise SystemExit()
         with io.open(last_parsed_url_file_pathname, "w", encoding="utf-8") as f:
             f.write(urls[-1])
+        add_log(f"Parse success. {len(urls)} new grants added")
     else:
         print("No new urls.. Nothing to parse!")
+        add_log("Parse success. No new grants")
 
 
 if __name__ == "__main__":
@@ -398,6 +448,7 @@ if __name__ == "__main__":
                 "\nWARNING!! Close all Excel files for correct parser`s job and try to parse again\
 \nPress ENTER to quit.."
             )
+            add_log("Some excel files oppened. Parser aborted", "warning")
             input()
             sys.exit()
     print("Job in progress..")
