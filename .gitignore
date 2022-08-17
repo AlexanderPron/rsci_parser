@@ -131,6 +131,6 @@ dmypy.json
 
 result.xlsx
 parse_result/
-test.py
+test*
 last_parsed_url.txt
 urls.txt

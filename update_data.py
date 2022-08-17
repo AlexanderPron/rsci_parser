@@ -9,11 +9,10 @@ import os
 import re
 from dataclasses import dataclass
 from contextlib import contextmanager
+import psutil
 
 
-Excel = win32com.client.gencache.EnsureDispatch("Excel.Application")
-Excel.DisplayAlerts = False
-
+PARSER_VERSION = "Version 1.4"
 BASE_URL = "http://www.rsci.ru"
 RESULT_FILE_NAME = "parsed_data.xlsx"
 
@@ -48,10 +47,17 @@ def openWorkbook(excelapp, excelfile):
         except Exception:
             excel_wb = excelapp.Workbooks.Add()
             excel_wb.SaveAs(excelfile)
-    yield excel_wb
-    excel_wb.Save()
-    excel_wb.Close()
-    excelapp.Quit()
+    if excel_wb:
+        yield excel_wb
+        try:
+            excel_wb.Save()
+            excel_wb.Close()
+        except Exception:
+            excel_wb.Close()
+    else:
+        print(f"\nWARNING!! Close file named {RESULT_FILE_NAME} and try to parse again\nPress ENTER to quit..")
+        input()
+        sys.exit()
 
 
 def timer(func):
@@ -69,7 +75,7 @@ def timer(func):
 
 
 def progress(count, total, status=""):
-    """CLI - прогрессбар. Взят из интернета"""
+    """CLI - прогрессбар"""
     bar_len = 60
     filled_len = int(round(bar_len * count / float(total)))
 
@@ -161,11 +167,6 @@ def get_url_file(file_pathname, page_num=1):
             progress(page, page_num, status="Getting urls file...")
             r = requests.get(f"{BASE_URL}/grants/index.php?PAGEN_1={page}&SIZEN_1=9")
             html = BS(r.content, "lxml")
-            # grants = html.select(".info-card > .info-card-body > .info-card-deskription")
-            # for grant in grants:
-            #     grant_link = grant.select("a")
-            #     f.write(f'{BASE_URL + grant_link[0].attrs["href"]}\n')
-            # page += 1
             grants = html.select(".info-card > .info-card-body")
             for grant in grants:
                 yyy = grant.select(".info-card-img > .img-text > .info-branch > a")
@@ -265,7 +266,6 @@ def get_new_grant_url_list(last_parsed_url_file_pathname, actual_url_file_pathna
                     result_url_dict[url] = grant_category
         return result_url_dict
     else:
-        # lines = []
         with io.open(actual_url_file_pathname, "r", encoding="utf-8") as actual_url_f:
             lines = actual_url_f.readlines()
         for line in lines:
@@ -351,18 +351,17 @@ def push_data(sheet, data: ParseData):
 @timer
 def main():
     """Главная функция, отражающая логику работы парсера"""
+    try:
+        Excel = win32com.client.gencache.EnsureDispatch("Excel.Application")
+        Excel.DisplayAlerts = False
+    except TypeError:
+        print("\nWARNING!! Close excel processes and try to parse again\nPress ENTER to quit..")
+        input()
+        sys.exit()
     url_file = os.path.join(BASE_DIR, "urls.txt")
     lim = 20
     update_url_file(url_file, limit=lim)
     last_parsed_url_file_pathname = os.path.join(BASE_DIR, "last_parsed_url.txt")
-    # if not os.path.isfile(last_parsed_url_file_pathname):
-    #     r = requests.get(f"{BASE_URL}/grants/index.php?PAGEN_1={lim}&SIZEN_1=9")
-    #     html = BS(r.content, "lxml")
-    #     grants = html.select(".info-card > .info-card-body > .info-card-deskription")
-    #     last_link = grants[-1].select("a")
-    #     full_last_grant_link = BASE_URL + last_link[0].attrs["href"]
-    #     with io.open(last_parsed_url_file_pathname, "w", encoding="utf-8") as f:
-    #         f.write(full_last_grant_link)
     urls_dict = get_new_grant_url_list(last_parsed_url_file_pathname, url_file)
     urls = list(urls_dict.keys())
     if urls:
@@ -384,7 +383,6 @@ def main():
                         push_data(sheet, parsed_data)
         except KeyboardInterrupt:
             wb.Close(False)
-            Excel.Quit()
             return
         with io.open(last_parsed_url_file_pathname, "w", encoding="utf-8") as f:
             f.write(urls[-1])
@@ -393,5 +391,14 @@ def main():
 
 
 if __name__ == "__main__":
+    print(PARSER_VERSION)
+    for proc in psutil.process_iter():
+        if proc.name() == "EXCEL.EXE":
+            print(
+                "\nWARNING!! Close all Excel files for correct parser`s job and try to parse again\
+\nPress ENTER to quit.."
+            )
+            input()
+            sys.exit()
     print("Job in progress..")
     main()
