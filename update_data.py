@@ -12,9 +12,10 @@ from contextlib import contextmanager
 import psutil
 
 
-PARSER_VERSION = "Version 1.5"
+PARSER_VERSION = "Version 1.6"
 BASE_URL = "http://www.rsci.ru"
 RESULT_FILE_NAME = "parsed_data.xlsx"
+last_url = "http://www.rsci.ru/grants/grant_news/284/244140.php"
 
 
 # Эта хрень связана с какими-то замутами с путями при создании exe-файла и добавлении в планировщик винды
@@ -50,18 +51,18 @@ def openWorkbook(excelapp, excelfile):
         except Exception:
             excel_wb = excelapp.Workbooks.Add()
             excel_wb.SaveAs(excelfile)
-    if excel_wb:
-        yield excel_wb
-        try:
-            excel_wb.Save()
-            excel_wb.Close()
-        except Exception:
-            excel_wb.Close()
-    else:
-        print(f"\nWARNING!! Close file named {RESULT_FILE_NAME} and try to parse again\nPress ENTER to quit..")
-        add_log("Some excel files oppened. Parser aborted", "warning")
-        input()
-        sys.exit()
+    # if excel_wb:
+    yield excel_wb
+    try:
+        excel_wb.Save()
+        excel_wb.Close()
+    except Exception:
+        excel_wb.Close()
+    # else:
+    #     print(f"\nWARNING!! Close file named {RESULT_FILE_NAME} and try to parse again\nPress ENTER to quit..")
+    #     add_log("Some excel files oppened. Parser aborted", "warning")
+    #     input()
+    #     sys.exit()
 
 
 def timer(func):
@@ -110,6 +111,8 @@ def timedelta_to_hms(duration):
 
 
 def add_log(msg_text, msg_type="info", log_file=log_file):
+    """Функция добавления лога msg_text со статусом msg_type в файл log_file"""
+
     with io.open(log_file, "a", encoding="utf-8") as f:
         record = f'\n[{datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S")}] {msg_type.upper()}: {msg_text}'
         f.write(record)
@@ -177,7 +180,7 @@ def checking_exceptions(str_):
 
 def get_url_file(file_pathname, page_num=1):
     """Функция для создания файла file_pathname с урлами грантов первых page_num страниц.
-    Возвращает список урлов в полученном файле"""
+    Возвращает словарь урлов в полученном файле"""
     try:
         page = 1
         with io.open(file_pathname, "w", encoding="utf-8") as f:
@@ -188,7 +191,7 @@ def get_url_file(file_pathname, page_num=1):
                 grants = html.select(".info-card > .info-card-body")
                 for grant in grants:
                     yyy = grant.select(".info-card-img > .img-text > .info-branch > a")
-                    if checking_exceptions(yyy[0].text):
+                    if yyy and checking_exceptions(yyy[0].text):
                         grant_link = grant.select(".info-card-deskription > a")
                         f.write(f'{BASE_URL + grant_link[0].attrs["href"]};{yyy[0].text}\n')
                 page += 1
@@ -205,7 +208,7 @@ def get_url_file(file_pathname, page_num=1):
 
 
 def update_url_file(file_pathname, limit=None):
-    """Функция обновления файла file_pathname урлов грантов. Возвращает список(!) добавленных новых строк или None"""
+    """Функция обновления файла file_pathname урлов грантов. Возвращает словарь(!) добавленных новых строк или None"""
     try:
         last_page = get_last_page() if not limit else limit
         result = {}
@@ -229,10 +232,10 @@ def update_url_file(file_pathname, limit=None):
                     for grant in grants:
                         waiting_animation(counter)
                         yyy = grant.select(".info-card-img > .img-text > .info-branch")
-                        grand_category = yyy[0].text
                         counter += 1
-                        if checking_exceptions(yyy[0].text):
+                        if yyy and checking_exceptions(yyy[0].text):
                             grant_link = grant.select(".info-card-deskription > a")
+                            grand_category = yyy[0].text
                             full_grant_link = BASE_URL + grant_link[0].attrs["href"]
                             if full_grant_link == last_url:
                                 if new_lines:
@@ -306,6 +309,26 @@ def get_new_grant_url_list(last_parsed_url_file_pathname, actual_url_file_pathna
         add_log(e, "error")
         raise SystemExit(e)
     return result_url_dict
+
+
+def get_urls(last_url, url_file):
+    """Функция получения словаря урлов, начиная с последнего урла(первый на первой странице) до урла last_url"""
+    result_url_dict = {}
+    with io.open(url_file, "r", encoding="utf-8") as actual_url_f:
+        lines = actual_url_f.readlines()
+        if len(lines) > 0:
+            for line in lines:
+                url = line.split(";")[0]
+                grant_category = line.split(";")[1]
+                if is_correct_link(url) and (url == last_url):
+                    result_url_dict[url] = grant_category
+                    return result_url_dict
+                else:
+                    if is_correct_link(url):
+                        result_url_dict[url] = grant_category
+            return result_url_dict
+        else:
+            update_url_file(url_file)
 
 
 def get_grant_id(url):
@@ -386,6 +409,8 @@ def main():
     try:
         Excel = win32com.client.gencache.EnsureDispatch("Excel.Application")
         Excel.DisplayAlerts = False
+        Excel.Visible = False
+        Excel.Interactive = False
     except TypeError:
         print("\nWARNING!! Close excel processes and try to parse again\nPress ENTER to quit..")
         add_log("Excel process is running in system", "warning")
@@ -397,15 +422,17 @@ def main():
         input()
         sys.exit()
     url_file = os.path.join(BASE_DIR, "urls.txt")
-    lim = 20
+    # lim = 20
     try:
-        update_url_file(url_file, limit=lim)
+        # update_url_file(url_file, limit=lim)
+        update_url_file(url_file)
     except KeyboardInterrupt:
         add_log("Parse interrupted by user", "warning")
         print("\nInterrupted")
         raise SystemExit()
     last_parsed_url_file_pathname = os.path.join(BASE_DIR, "last_parsed_url.txt")
-    urls_dict = get_new_grant_url_list(last_parsed_url_file_pathname, url_file)
+    # urls_dict = get_new_grant_url_list(last_parsed_url_file_pathname, url_file)
+    urls_dict = get_urls(last_url, url_file)
     urls = list(urls_dict.keys())
     if urls:
         pdatetime = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M_%S")
@@ -434,7 +461,7 @@ def main():
             raise SystemExit()
         with io.open(last_parsed_url_file_pathname, "w", encoding="utf-8") as f:
             f.write(urls[-1])
-        add_log(f"Parse success. {len(urls)} new grants added")
+        add_log(f"Parse success. {len(urls)} grants added to {file_path_name}.xlsx")
     else:
         print("No new urls.. Nothing to parse!")
         add_log("Parse success. No new grants")
@@ -442,14 +469,14 @@ def main():
 
 if __name__ == "__main__":
     print(PARSER_VERSION)
-    for proc in psutil.process_iter():
-        if proc.name() == "EXCEL.EXE":
-            print(
-                "\nWARNING!! Close all Excel files for correct parser`s job and try to parse again\
-\nPress ENTER to quit.."
-            )
-            add_log("Some excel files oppened. Parser aborted", "warning")
-            input()
-            sys.exit()
+    #     for proc in psutil.process_iter():
+    #         if proc.name() == "EXCEL.EXE":
+    #             print(
+    #                 "\nWARNING!! Close all Excel files for correct parser`s job and try to parse again\
+    # \nPress ENTER to quit.."
+    #             )
+    #             add_log("Some excel files oppened. Parser aborted", "warning")
+    #             input()
+    #             sys.exit()
     print("Job in progress..")
     main()
