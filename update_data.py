@@ -183,17 +183,23 @@ def get_url_file(file_pathname, page_num=1):
     Возвращает словарь урлов в полученном файле"""
     try:
         page = 1
+        count = 1
         with io.open(file_pathname, "w", encoding="utf-8") as f:
             while page != page_num + 1:
-                progress(page, page_num, status="Getting urls file...")
+                # progress(page, page_num, status="Getting urls file...")
+                waiting_animation(count, status="Getting urls file...")
                 r = requests.get(f"{BASE_URL}/grants/index.php?PAGEN_1={page}&SIZEN_1=9")
                 html = BS(r.content, "lxml")
                 grants = html.select(".info-card > .info-card-body")
                 for grant in grants:
+                    count += 1
                     yyy = grant.select(".info-card-img > .img-text > .info-branch > a")
                     if yyy and checking_exceptions(yyy[0].text):
                         grant_link = grant.select(".info-card-deskription > a")
                         f.write(f'{BASE_URL + grant_link[0].attrs["href"]};{yyy[0].text}\n')
+                        if BASE_URL + grant_link[0].attrs["href"] == last_url:
+                            page = page_num
+                            break
                 page += 1
     except requests.exceptions.RequestException as e:
         add_log(e, "error")
