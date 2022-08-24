@@ -41,37 +41,21 @@ class ParseData:
 
 
 @contextmanager
-def openWorkbook(excelapp, excelfile):
+def openWorkbook(excelapp, excelfile_name):
     """Контекстный менеджер для корректного открытия и закрытия excel-файла.Если файла не существует, то он создаётся"""
-    # excelapp.DisplayAlerts = False
-    # excelapp.Visible = False
-    # excelapp.Interactive = False
     try:
-        excel_wb = excelapp.Workbooks(excelfile)
+        excel_wb = excelapp.Workbooks(excelfile_name)
     except Exception:
         try:
-            excel_wb = excelapp.Workbooks.Open(excelfile)
+            excel_wb = excelapp.Workbooks.Open(excelfile_name)
         except Exception:
             excel_wb = excelapp.Workbooks.Add()
-            excel_wb.SaveAs(excelfile)
-    # if excel_wb:
+            excel_wb.SaveAs(excelfile_name)
     yield excel_wb
     try:
-        # excel_wb.Save()
         excel_wb.Close()
-        # excelapp.DisplayAlerts = True
-        # excelapp.Visible = True
-        # excelapp.Interactive = True
     except Exception:
         excel_wb.Close()
-        # excelapp.DisplayAlerts = True
-        # excelapp.Visible = True
-        # excelapp.Interactive = True
-    # else:
-    #     print(f"\nWARNING!! Close file named {RESULT_FILE_NAME} and try to parse again\nPress ENTER to quit..")
-    #     add_log("Some excel files oppened. Parser aborted", "warning")
-    #     input()
-    #     sys.exit()
 
 
 def timer(func):
@@ -190,12 +174,12 @@ def checking_exceptions(str_):
 def get_url_file(file_pathname, page_num=1):
     """Функция для создания файла file_pathname с урлами грантов первых page_num страниц.
     Возвращает словарь урлов в полученном файле"""
+    pars_timer = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         page = 1
         count = 1
         with io.open(file_pathname, "w", encoding="utf-8") as f:
             while page != page_num + 1:
-                # progress(page, page_num, status="Getting urls file...")
                 waiting_animation(count, status="Getting urls file...")
                 r = requests.get(f"{BASE_URL}/grants/index.php?PAGEN_1={page}&SIZEN_1=9")
                 html = BS(r.content, "lxml")
@@ -205,7 +189,7 @@ def get_url_file(file_pathname, page_num=1):
                     yyy = grant.select(".info-card-img > .img-text > .info-branch > a")
                     if yyy and checking_exceptions(yyy[0].text):
                         grant_link = grant.select(".info-card-deskription > a")
-                        f.write(f'{BASE_URL + grant_link[0].attrs["href"]};{yyy[0].text}\n')
+                        f.write(f'{BASE_URL + grant_link[0].attrs["href"]};{yyy[0].text};{pars_timer}\n')
                         if BASE_URL + grant_link[0].attrs["href"] == last_url:
                             page = page_num
                             break
@@ -224,6 +208,7 @@ def get_url_file(file_pathname, page_num=1):
 
 def update_url_file(file_pathname, limit=None):
     """Функция обновления файла file_pathname урлов грантов. Возвращает словарь(!) добавленных новых строк или None"""
+    pars_timer = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         last_page = get_last_page() if not limit else limit
         result = {}
@@ -258,7 +243,6 @@ def update_url_file(file_pathname, limit=None):
                                         copy_new_lines = []
                                         copy_new_lines.extend(new_lines)
                                         for item in copy_new_lines:
-                                            # result.append(item.rstrip("\n"))
                                             result[item.split(";")[0]] = item.split(";")[1]
                                         new_lines.extend(lines)
                                         url_file.writelines(new_lines)
@@ -268,7 +252,7 @@ def update_url_file(file_pathname, limit=None):
                                 print("\nUpdated!")
                                 return result
                             else:
-                                new_lines.append(f"{full_grant_link};{grand_category}\n")
+                                new_lines.append(f"{full_grant_link};{grand_category};{pars_timer}\n")
                     page += 1
             else:
                 result = get_url_file(file_pathname, last_page)
@@ -335,12 +319,13 @@ def get_urls(last_url, url_file):
             for line in lines:
                 url = line.split(";")[0]
                 grant_category = line.split(";")[1]
+                pars_timer = line.split(";")[2]
                 if is_correct_link(url) and (url == last_url):
-                    result_url_dict[url] = grant_category
+                    result_url_dict[url] = [grant_category, pars_timer]
                     return result_url_dict
                 else:
                     if is_correct_link(url):
-                        result_url_dict[url] = grant_category
+                        result_url_dict[url] = [grant_category, pars_timer]
             return result_url_dict
         else:
             update_url_file(url_file)
@@ -375,7 +360,7 @@ def sheet_format(sheet):
     return sheet
 
 
-def parse_url(url, grant_category):
+def parse_url(url, grant_category, pars_timer):
     """Функция, которая парсит url. На выходе - объект класса ParseData с распарсеными данными"""
     if not is_correct_link(url):
         return None
@@ -391,13 +376,12 @@ def parse_url(url, grant_category):
         else:
             full_describe_text = full_describe_text.rstrip("\n")
             full_describe_text += f"{string}\n"
-    dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     parsed_url_data = ParseData(
         title=grant_title[0].text,
         date=grant_date[0].text,
         detail=full_describe_text,
         category=grant_category,
-        parse_datetime=dt,
+        parse_datetime=pars_timer,
     )
     return parsed_url_data
 
@@ -422,79 +406,69 @@ def push_data(sheet, data: ParseData):
 def main():
     """Главная функция, отражающая логику работы парсера"""
     try:
-        Excel = win32com.client.gencache.EnsureDispatch("Excel.Application")
+        Excel = win32com.client.Dispatch("Excel.Application")
+        url_file = os.path.join(BASE_DIR, "urls.txt")
+        try:
+            update_url_file(url_file)
+        except KeyboardInterrupt:
+            add_log("Parse interrupted by user", "warning")
+            print("\nInterrupted")
+            raise SystemExit()
+        last_parsed_url_file_pathname = os.path.join(BASE_DIR, "last_parsed_url.txt")
+        # urls_dict = get_new_grant_url_list(last_parsed_url_file_pathname, url_file)
+        urls_dict = get_urls(last_url, url_file)
+        urls = list(urls_dict.keys())
+        if urls:
+            pdatetime = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M_%S")
+            result_fname = f"parser_data_{pdatetime}"
+            count_urls = len(urls)
+            k = 1
+            current_folder = os.path.join(BASE_DIR, "parse_result")
+            if not os.path.isdir(current_folder):
+                os.makedirs(current_folder)
+            # file_path_name = os.path.join(current_folder, RESULT_FILE_NAME)
+            file_path_name = os.path.join(current_folder, result_fname)
+            try:
+                with openWorkbook(Excel, file_path_name) as wb:
+                    sheet = wb.ActiveSheet
+                    urls.reverse()
+                    wb.Visible = True
+                    wb.DisplayAlerts = False
+                    wb.Interactive = False
+                    for url in urls:
+                        progress(k, count_urls, status="Parsing urls...")
+                        k += 1
+                        if url:
+                            parsed_data = parse_url(url, urls_dict.get(url)[0], urls_dict.get(url)[1])
+                            push_data(sheet, parsed_data)
+                    wb.SaveAs(file_path_name)
+            except KeyboardInterrupt:
+                wb.Close(False)
+                add_log("Parse interrupted by user", "warning")
+                print("\nInterrupted")
+                raise SystemExit()
+            with io.open(last_parsed_url_file_pathname, "w", encoding="utf-8") as f:
+                f.write(urls[-1])
+            add_log(f"Parse success. {len(urls)} grants added to {file_path_name}.xlsx")
+        else:
+            print("No new urls.. Nothing to parse!")
+            add_log("Parse success. No new grants")
+        # Excel.DisplayAlerts = True
+        # Excel.Visible = True
+        # Excel.Interactive = True
     except TypeError:
         print("\nWARNING!! Close excel processes and try to parse again\nPress ENTER to quit..")
         add_log("Excel process is running in system", "warning")
         input()
         sys.exit()
-    except Exception as e:
-        print("\nUnknown error. See details in log file\nPress ENTER to quit..")
-        add_log(e, "error")
-        input()
-        sys.exit()
-    url_file = os.path.join(BASE_DIR, "urls.txt")
-    # lim = 20
-    try:
-        # update_url_file(url_file, limit=lim)
-        update_url_file(url_file)
-    except KeyboardInterrupt:
-        add_log("Parse interrupted by user", "warning")
-        print("\nInterrupted")
-        raise SystemExit()
-    last_parsed_url_file_pathname = os.path.join(BASE_DIR, "last_parsed_url.txt")
-    # urls_dict = get_new_grant_url_list(last_parsed_url_file_pathname, url_file)
-    urls_dict = get_urls(last_url, url_file)
-    urls = list(urls_dict.keys())
-    if urls:
-        pdatetime = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M_%S")
-        result_fname = f"parser_data_{pdatetime}"
-        count_urls = len(urls)
-        k = 1
-        current_folder = os.path.join(BASE_DIR, "parse_result")
-        if not os.path.isdir(current_folder):
-            os.makedirs(current_folder)
-        # file_path_name = os.path.join(current_folder, RESULT_FILE_NAME)
-        file_path_name = os.path.join(current_folder, result_fname)
-        try:
-            with openWorkbook(Excel, file_path_name) as wb:
-                wb.DisplayAlerts = False
-                wb.Visible = False
-                wb.Interactive = False
-                sheet = wb.ActiveSheet
-                # print(Excel.DisplayAlerts)
-                # print(Excel.Visible)
-                # print(Excel.Interactive)
-                urls.reverse()
-                for url in urls:
-                    progress(k, count_urls, status="Parsing urls...")
-                    k += 1
-                    if url:
-                        parsed_data = parse_url(url, urls_dict.get(url))
-                        push_data(sheet, parsed_data)
-        except KeyboardInterrupt:
-            wb.Close(False)
-            add_log("Parse interrupted by user", "warning")
-            print("\nInterrupted")
-            raise SystemExit()
-        with io.open(last_parsed_url_file_pathname, "w", encoding="utf-8") as f:
-            f.write(urls[-1])
-        add_log(f"Parse success. {len(urls)} grants added to {file_path_name}.xlsx")
-    else:
-        print("No new urls.. Nothing to parse!")
-        add_log("Parse success. No new grants")
+    # except Exception as e:
+    #     print("\nUnknown error. See details in log file\nPress ENTER to quit..")
+    #     add_log(e.with_traceback, "error")
+    #     input()
+    #     sys.exit()
 
 
 if __name__ == "__main__":
     print(PARSER_VERSION)
-    #     for proc in psutil.process_iter():
-    #         if proc.name() == "EXCEL.EXE":
-    #             print(
-    #                 "\nWARNING!! Close all Excel files for correct parser`s job and try to parse again\
-    # \nPress ENTER to quit.."
-    #             )
-    #             add_log("Some excel files oppened. Parser aborted", "warning")
-    #             input()
-    #             sys.exit()
     print("Job in progress..")
     main()
