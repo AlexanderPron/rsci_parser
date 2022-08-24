@@ -43,6 +43,9 @@ class ParseData:
 @contextmanager
 def openWorkbook(excelapp, excelfile):
     """Контекстный менеджер для корректного открытия и закрытия excel-файла.Если файла не существует, то он создаётся"""
+    # excelapp.DisplayAlerts = False
+    # excelapp.Visible = False
+    # excelapp.Interactive = False
     try:
         excel_wb = excelapp.Workbooks(excelfile)
     except Exception:
@@ -56,8 +59,14 @@ def openWorkbook(excelapp, excelfile):
     try:
         excel_wb.Save()
         excel_wb.Close()
+        # excelapp.DisplayAlerts = True
+        # excelapp.Visible = True
+        # excelapp.Interactive = True
     except Exception:
         excel_wb.Close()
+        # excelapp.DisplayAlerts = True
+        # excelapp.Visible = True
+        # excelapp.Interactive = True
     # else:
     #     print(f"\nWARNING!! Close file named {RESULT_FILE_NAME} and try to parse again\nPress ENTER to quit..")
     #     add_log("Some excel files oppened. Parser aborted", "warning")
@@ -414,9 +423,6 @@ def main():
     """Главная функция, отражающая логику работы парсера"""
     try:
         Excel = win32com.client.gencache.EnsureDispatch("Excel.Application")
-        Excel.DisplayAlerts = False
-        Excel.Visible = False
-        Excel.Interactive = False
     except TypeError:
         print("\nWARNING!! Close excel processes and try to parse again\nPress ENTER to quit..")
         add_log("Excel process is running in system", "warning")
@@ -452,7 +458,13 @@ def main():
         file_path_name = os.path.join(current_folder, result_fname)
         try:
             with openWorkbook(Excel, file_path_name) as wb:
+                wb.DisplayAlerts = True
+                wb.Visible = True
+                wb.Interactive = True
                 sheet = wb.ActiveSheet
+                # print(Excel.DisplayAlerts)
+                # print(Excel.Visible)
+                # print(Excel.Interactive)
                 urls.reverse()
                 for url in urls:
                     progress(k, count_urls, status="Parsing urls...")
