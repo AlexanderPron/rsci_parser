@@ -21,8 +21,7 @@ last_url = "http://www.rsci.ru/grants/grant_news/284/244140.php"
 # Эта хрень связана с какими-то замутами с путями при создании exe-файла и добавлении в планировщик винды
 # https://pyinstaller.org/en/stable/runtime-information.html#using-file-and-sys-meipass
 if getattr(sys, "frozen", False):
-    (filepath, tempfilename) = os.path.split(sys.argv[0])
-    BASE_DIR = filepath
+    BASE_DIR = os.path.dirname(sys.executable)
 else:
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -49,13 +48,12 @@ def openWorkbook(excelapp, excelfile_name):
         try:
             excel_wb = excelapp.Workbooks.Open(excelfile_name)
         except Exception:
+            print(excelfile_name)
             excel_wb = excelapp.Workbooks.Add()
             excel_wb.SaveAs(excelfile_name)
     yield excel_wb
-    try:
-        excel_wb.Close()
-    except Exception:
-        excel_wb.Close()
+    excel_wb.Close(True)
+    excelapp = None
 
 
 def timer(func):
@@ -432,7 +430,7 @@ def main():
                 with openWorkbook(Excel, file_path_name) as wb:
                     sheet = wb.ActiveSheet
                     urls.reverse()
-                    wb.Visible = True
+                    # wb.Visible = True
                     wb.DisplayAlerts = False
                     wb.Interactive = False
                     for url in urls:
@@ -441,7 +439,7 @@ def main():
                         if url:
                             parsed_data = parse_url(url, urls_dict.get(url)[0], urls_dict.get(url)[1])
                             push_data(sheet, parsed_data)
-                    wb.SaveAs(file_path_name)
+                    # wb.SaveAs(file_path_name)
             except KeyboardInterrupt:
                 wb.Close(False)
                 add_log("Parse interrupted by user", "warning")
