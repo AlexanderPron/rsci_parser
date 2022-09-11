@@ -48,11 +48,22 @@ def openWorkbook(excelapp, excelfile_name):
         try:
             excel_wb = excelapp.Workbooks.Open(excelfile_name)
         except Exception:
-            print(excelfile_name)
             excel_wb = excelapp.Workbooks.Add()
             excel_wb.SaveAs(excelfile_name)
+    # try:
+    #     excelapp.DisplayAlerts = False
+    #     excelapp.Interactive = False
+    #     excelapp.Visible = False
+    # except Exception as e:
+    #     if excel_wb:
+    #         excel_wb.Close(False)
+    #         excel_wb = None
+    #     excelapp = None
+    #     add_log(f"{e}", "error")
     yield excel_wb
-    excel_wb.Close(True)
+    if excel_wb:
+        excel_wb.Close(True)
+    excel_wb = None
     excelapp = None
 
 
@@ -338,23 +349,29 @@ def get_grant_id(url):
 
 def sheet_format(sheet):
     """Функция применения стиля для exel листа sheet"""
-    sheet.Columns(1).ColumnWidth = 5
-    sheet.Columns(2).ColumnWidth = 30
-    sheet.Columns(3).ColumnWidth = 30
-    sheet.Columns(4).ColumnWidth = 10
-    sheet.Columns(5).ColumnWidth = 100
-    sheet.Columns(6).ColumnWidth = 20
-    sheet.Columns.WrapText = True
-    sheet.Range("A1:F1").HorizontalAlignment = win32com.client.constants.xlCenter
-    sheet.Range("A1:F1").VerticalAlignment = win32com.client.constants.xlCenter
-    sheet.Range("A2:F1000").HorizontalAlignment = win32com.client.constants.xlLeft
-    sheet.Range("A2:F1000").VerticalAlignment = win32com.client.constants.xlTop
-    sheet.Cells(1, 1).Value = "№ п/п"
-    sheet.Cells(1, 2).Value = "Категория"
-    sheet.Cells(1, 3).Value = "Название гранта"
-    sheet.Cells(1, 4).Value = "Дата"
-    sheet.Cells(1, 5).Value = "Описание"
-    sheet.Cells(1, 6).Value = "Дата и время парсинга"
+    try:
+        sheet.Columns(1).ColumnWidth = 5
+        sheet.Columns(2).ColumnWidth = 30
+        sheet.Columns(3).ColumnWidth = 30
+        sheet.Columns(4).ColumnWidth = 10
+        sheet.Columns(5).ColumnWidth = 100
+        sheet.Columns(6).ColumnWidth = 20
+        sheet.Columns.WrapText = True
+        sheet.Range("A1:F1").HorizontalAlignment = win32com.client.constants.xlCenter
+        sheet.Range("A1:F1").VerticalAlignment = win32com.client.constants.xlCenter
+        sheet.Range("A2:F1000").HorizontalAlignment = win32com.client.constants.xlLeft
+        sheet.Range("A2:F1000").VerticalAlignment = win32com.client.constants.xlTop
+        sheet.Cells(1, 1).Value = "№ п/п"
+        sheet.Cells(1, 2).Value = "Категория"
+        sheet.Cells(1, 3).Value = "Название гранта"
+        sheet.Cells(1, 4).Value = "Дата"
+        sheet.Cells(1, 5).Value = "Описание"
+        sheet.Cells(1, 6).Value = "Дата и время парсинга"
+    except Exception as e:
+        add_log(f"{e}", "error")
+        print("\nSomething wrong.. See details in parser.log")
+        raise SystemExit()
+
     return sheet
 
 
@@ -404,7 +421,10 @@ def push_data(sheet, data: ParseData):
 def main():
     """Главная функция, отражающая логику работы парсера"""
     try:
-        Excel = win32com.client.Dispatch("Excel.Application")
+        # В этом режиме не работают константы, типа win32com.client.constants.xlCenter и др.
+        # Excel = win32com.client.Dispatch("Excel.Application")
+        Excel = win32com.client.gencache.EnsureDispatch("Excel.Application")
+        # Excel = win32com.client.dynamic.Dispatch("Excel.Application")
         url_file = os.path.join(BASE_DIR, "urls.txt")
         try:
             update_url_file(url_file)
@@ -428,22 +448,42 @@ def main():
             file_path_name = os.path.join(current_folder, result_fname)
             try:
                 with openWorkbook(Excel, file_path_name) as wb:
-                    sheet = wb.ActiveSheet
-                    urls.reverse()
-                    # wb.Visible = True
-                    wb.DisplayAlerts = False
-                    wb.Interactive = False
-                    for url in urls:
-                        progress(k, count_urls, status="Parsing urls...")
-                        k += 1
-                        if url:
-                            parsed_data = parse_url(url, urls_dict.get(url)[0], urls_dict.get(url)[1])
-                            push_data(sheet, parsed_data)
-                    # wb.SaveAs(file_path_name)
+                    if wb:
+                        Excel.Interactive = False
+                        Excel.Visible = False
+                        Excel.DisplayAlerts = False
+                        print(f"DisplayAlerts:{Excel.DisplayAlerts}\nInteractive:{Excel.Interactive}\nVisible:{Excel.Visible}")
+                        sheet = wb.ActiveSheet
+                        urls.reverse()
+                        for url in urls:
+                            progress(k, count_urls, status="Parsing urls...")
+                            k += 1
+                            if url:
+                                parsed_data = parse_url(url, urls_dict.get(url)[0], urls_dict.get(url)[1])
+                                push_data(sheet, parsed_data)
+                    else:
+                        print("Something wrong.. See details in parser.log")
+                        raise SystemExit()
             except KeyboardInterrupt:
-                wb.Close(False)
+                if wb:
+                    wb.Close(False)
                 add_log("Parse interrupted by user", "warning")
                 print("\nInterrupted")
+                Excel.Interactive = True
+                Excel.Visible = True
+                Excel.DisplayAlerts = True
+                wb = None
+                Excel = None
+                raise SystemExit()
+            except Exception as e:
+                if wb:
+                    wb.Close(False)
+                add_log(f"{e}", "error")
+                Excel.Interactive = True
+                Excel.Visible = True
+                Excel.DisplayAlerts = True
+                wb = None
+                Excel = None
                 raise SystemExit()
             with io.open(last_parsed_url_file_pathname, "w", encoding="utf-8") as f:
                 f.write(urls[-1])
@@ -451,9 +491,6 @@ def main():
         else:
             print("No new urls.. Nothing to parse!")
             add_log("Parse success. No new grants")
-        # Excel.DisplayAlerts = True
-        # Excel.Visible = True
-        # Excel.Interactive = True
     except TypeError:
         print("\nWARNING!! Close excel processes and try to parse again\nPress ENTER to quit..")
         add_log("Excel process is running in system", "warning")
