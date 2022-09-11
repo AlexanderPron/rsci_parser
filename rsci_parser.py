@@ -12,7 +12,7 @@ from contextlib import contextmanager
 import psutil
 
 
-PARSER_VERSION = "Version 1.6"
+PARSER_VERSION = "Version 1.7alfa"
 BASE_URL = "http://www.rsci.ru"
 RESULT_FILE_NAME = "parsed_data.xlsx"
 last_url = "http://www.rsci.ru/grants/grant_news/284/244140.php"
